@@ -1,0 +1,44 @@
+digraph qwen3_class_structure {
+  graph [
+    rankdir=TB, bgcolor="#ffffff", pad="0.4", nodesep="0.45", ranksep="0.65",
+    splines=polyline, fontname="Arial", fontsize=26, fontcolor="#0f172a",
+    labelloc=t, label="Qwen3-0.6B · 模型模块结构\n\n箭头表示包含关系，边上的名称对应成员变量"
+  ];
+  node [
+    shape=box, style="rounded,filled", fontname="Arial", fontsize=17,
+    color="#cbd5e1", fillcolor="#f8fafc", fontcolor="#0f172a",
+    penwidth=1.4, margin="0.20,0.15"
+  ];
+  edge [fontname="Arial", fontsize=13, fontcolor="#475569", color="#94a3b8", penwidth=1.4, arrowsize=0.75];
+
+  lm [label="Qwen3ForCausalLM\n模型整体封装", fillcolor="#0f172a", fontcolor="#ffffff", color="#0f172a"];
+  model [label="Qwen3Model\n返回 hidden states", fillcolor="#eff6ff", color="#60a5fa"];
+  head [label="ParallelLMHead\n1024 → 151936\ncompute_logits() 输出 logits", fillcolor="#f5f3ff", color="#a78bfa"];
+  embedding [label="VocabParallelEmbedding\ntoken ID → 1024 维向量", fillcolor="#f0fdfa", color="#5eead4"];
+  layers [label="Qwen3DecoderLayer × 28\n由 num_hidden_layers 决定", fillcolor="#eff6ff", color="#60a5fa"];
+  final_norm [label="RMSNorm\n模型最后的归一化", fillcolor="#fffbeb", color="#fbbf24"];
+  block_norm [label="RMSNorm × 2\ninput_layernorm\npost_attention_layernorm", fillcolor="#fffbeb", color="#fbbf24"];
+  attention [label="Qwen3Attention\nGQA：16 个 Q head / 8 个 KV head\n每个 head 128 维", fillcolor="#eff6ff", color="#60a5fa"];
+  mlp [label="Qwen3MLP\nSwiGLU 前馈网络\n1024 → 3072 → 1024", fillcolor="#f0fdfa", color="#5eead4"];
+  qk_norm [label="RMSNorm × 2\nq_norm / k_norm\n对每个 Q、K head 归一化", fillcolor="#fffbeb", color="#fbbf24"];
+
+  lm -> model [label="model"];
+  lm -> head [label="lm_head"];
+  model -> embedding [label="embed_tokens"];
+  model -> layers [label="layers"];
+  model -> final_norm [label="norm"];
+  layers -> block_norm;
+  layers -> attention [label="self_attn"];
+  layers -> mlp [label="mlp"];
+  attention -> qk_norm;
+
+  { rank=same; model; head; }
+  { rank=same; embedding; layers; final_norm; }
+  { rank=same; block_norm; attention; mlp; }
+
+  note [
+    label="模型外：Tokenizer 负责文本 → token ID；Sampler 对 logits 做温度缩放、softmax 和采样。\n本模型 tie_word_embeddings=true：Embedding 与 LM Head 共享权重。\n本模型 attention_bias=false：这份实现启用 q_norm / k_norm。",
+    shape=box, style="rounded,filled", fontsize=14, fillcolor="#f8fafc", color="#e2e8f0", fontcolor="#475569"
+  ];
+  qk_norm -> note [style=invis];
+}

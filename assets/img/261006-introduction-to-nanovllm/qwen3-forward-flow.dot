@@ -1,0 +1,68 @@
+digraph qwen3_forward_flow {
+  graph [
+    rankdir=TB, bgcolor="#ffffff", pad="0.35", nodesep="0.55", ranksep="0.35",
+    splines=polyline, compound=true, fontname="Arial", fontsize=25, fontcolor="#0f172a",
+    labelloc=t, label="Qwen3-0.6B · 前向计算流程\n\n实线：数据流     虚线：残差连接"
+  ];
+  node [
+    shape=box, style="rounded,filled", fontname="Arial", fontsize=16,
+    color="#cbd5e1", fillcolor="#f8fafc", fontcolor="#0f172a",
+    penwidth=1.3, margin="0.18,0.11"
+  ];
+  edge [fontname="Arial", fontsize=12, fontcolor="#475569", color="#64748b", penwidth=1.4, arrowsize=0.7];
+
+  tokenizer [label="文本 → Tokenizer → input_ids\nTokenizer 在模型外部", fillcolor="#f1f5f9"];
+  sampling [label="Sampler（模型外部）\n温度缩放 → softmax → 采样\n得到下一个 token ID", fillcolor="#f1f5f9"];
+
+  subgraph cluster_lm {
+    label="Qwen3ForCausalLM";
+    fontname="Arial"; fontsize=19; fontcolor="#0f172a";
+    color="#94a3b8"; penwidth=1.3; style=rounded; margin=20;
+
+    subgraph cluster_model {
+      label="Qwen3Model · forward()";
+      fontname="Arial"; fontsize=18; fontcolor="#2563eb";
+      color="#93c5fd"; style="rounded,filled"; fillcolor="#f8fbff"; margin=18;
+
+      embedding [label="VocabParallelEmbedding\ntoken ID → 1024 维 hidden states", fillcolor="#f0fdfa", color="#5eead4"];
+
+      subgraph cluster_block {
+        label="Qwen3DecoderLayer · 顺序重复 28 次";
+        fontname="Arial"; fontsize=17; fontcolor="#2563eb";
+        color="#bfdbfe"; style="rounded,filled"; fillcolor="#ffffff"; margin=18;
+
+        x [label="本层输入 x", fillcolor="#eff6ff", color="#60a5fa"];
+        norm1 [label="input_layernorm\nRMSNorm", fillcolor="#fffbeb", color="#fbbf24"];
+        attn [label="Qwen3Attention\nQKV 投影 → Q/K Norm → RoPE\n因果注意力 → 输出投影", fillcolor="#eff6ff", color="#60a5fa"];
+        add1 [label="+", shape=circle, fixedsize=true, width=0.38, fontsize=18, margin=0, fillcolor="#fff7ed", color="#fb923c"];
+        norm2 [label="post_attention_layernorm\nRMSNorm", fillcolor="#fffbeb", color="#fbbf24"];
+        mlp [label="Qwen3MLP\nGate / Up 投影 → SiLU × Up\nDown 投影", fillcolor="#f0fdfa", color="#5eead4"];
+        add2 [label="+", shape=circle, fixedsize=true, width=0.38, fontsize=18, margin=0, fillcolor="#fff7ed", color="#fb923c"];
+
+        x -> norm1 -> attn -> add1 -> norm2 -> mlp -> add2;
+        x:w -> add1:w [style=dashed, color="#f97316", fontcolor="#c2410c", label="残差 x"];
+        add1:e -> add2:e [style=dashed, color="#f97316", fontcolor="#c2410c", label="保留上一残差"];
+      }
+
+      final_norm [label="Qwen3Model.norm\n最终 RMSNorm", fillcolor="#fffbeb", color="#fbbf24"];
+      hidden [label="hidden_states\n每个 token 1024 维", fillcolor="#eff6ff", color="#60a5fa"];
+
+      embedding -> x [lhead=cluster_block];
+      add2 -> final_norm [label="第 28 个 block 之后"];
+      final_norm -> hidden;
+    }
+
+    head [label="ParallelLMHead · compute_logits()\n1024 → vocab_size = 151936\nPrefill 时先选择每条序列最后一个 token", fillcolor="#f5f3ff", color="#a78bfa"];
+    logits [label="logits\n每个词表 token 的分数", fillcolor="#f5f3ff", color="#a78bfa"];
+    hidden -> head -> logits;
+  }
+
+  tokenizer -> embedding [lhead=cluster_lm];
+  logits -> sampling;
+
+  note [
+    label="图中的 + 按数学语义展开。源码将残差相加与 RMSNorm 融合执行；\nMLP 后的加法延后到下一层 input_layernorm 或最后的 model.norm。",
+    fontsize=13, fillcolor="#f8fafc", color="#e2e8f0", fontcolor="#475569"
+  ];
+  sampling -> note [style=invis];
+}
